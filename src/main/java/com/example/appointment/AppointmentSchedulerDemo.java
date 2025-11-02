@@ -31,8 +31,9 @@ public class AppointmentSchedulerDemo {
         System.out.println("=================================================");
         System.out.println("Type your message to interact with the agent.");
         System.out.println("Special commands:");
-        System.out.println("  /slots - Check available appointment slots");
-        System.out.println("  /quit  - Exit the application");
+        System.out.println("  /slots  - Check available appointment slots");
+        System.out.println("  /booked - View all booked appointments");
+        System.out.println("  /quit   - Exit the application");
         System.out.println("=================================================\n");
 
         boolean running = true;
@@ -49,6 +50,9 @@ public class AppointmentSchedulerDemo {
                 running = false;
             } else if (userInput.equalsIgnoreCase("/slots")) {
                 agentPid.tell(new GetAvailableSlots(receiverPid));
+                Thread.sleep(500); // Give time for response
+            } else if (userInput.equalsIgnoreCase("/booked")) {
+                agentPid.tell(new GetBookedAppointments(receiverPid));
                 Thread.sleep(500); // Give time for response
             } else {
                 agentPid.tell(new UserMessage(userInput, receiverPid));

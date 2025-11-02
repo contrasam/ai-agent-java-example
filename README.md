@@ -55,8 +55,9 @@ run.bat
 =================================================
 Type your message to interact with the agent.
 Special commands:
-  /slots - Check available appointment slots
-  /quit  - Exit the application
+  /slots  - Check available appointment slots
+  /booked - View all booked appointments
+  /quit   - Exit the application
 =================================================
 
 You: Hi, I need to book an appointment
@@ -72,6 +73,10 @@ Agent: Available slots:
 
 You: Book me for Tuesday at 11:00
 Agent: Great! I've booked your appointment for 2025-11-06 at 11:00
+
+You: /booked
+Agent: Booked appointments:
+  - 2025-11-06 at 11:00
 
 You: /quit
 Thank you for using the Appointment Scheduling Agent. Goodbye!
@@ -111,10 +116,23 @@ The `AppointmentAgentHandler` processes messages using pattern matching:
 return switch (message) {
     case UserMessage um -> handleUserMessage(um, state, context);
     case GetAvailableSlots gas -> handleGetSlots(gas, state, context);
+    case GetBookedAppointments gba -> handleGetBookings(gba, state, context);
     case BookAppointment ba -> handleBooking(ba, state, context);
     case LLMResponse lr -> state.addMessage("assistant", lr.content());
 };
 ```
+
+### AI-Powered Booking
+
+When the AI detects booking intent from the user, it responds with a special command format:
+```
+BOOK:2025-11-06:09:00
+```
+
+The agent parses this command and automatically triggers a `BookAppointment` message to actually book the slot. This ensures that:
+- The AI handles natural language understanding
+- The actor system handles the actual state mutation
+- Bookings are properly persisted and tracked
 
 ## Key Actor Model Benefits
 

@@ -30,13 +30,14 @@ public class AppointmentAgentHandler
 
     @Override
     public AppointmentState receive(
-            AppointmentMessage message,
-            AppointmentState state,
-            ActorContext context
+        AppointmentMessage message,
+        AppointmentState state,
+        ActorContext context
     ) {
         return switch (message) {
             case UserMessage um -> handleUserMessage(um, state, context);
             case GetAvailableSlots gas -> handleGetSlots(gas, state, context);
+            case GetBookedAppointments gba -> handleGetBookings(gba, state, context);
             case BookAppointment ba -> handleBooking(ba, state, context);
             case LLMResponse lr -> state.addMessage("assistant", lr.content());
         };
@@ -62,16 +63,20 @@ public class AppointmentAgentHandler
     private String buildSystemPrompt(AppointmentState state) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("You are an appointment scheduling assistant. ");
-        prompt.append("Here are the available time slots:\\n");
+        prompt.append("Here are the available time slots:\n");
 
         state.availableSlots().forEach((date, times) -> {
-            prompt.append(String.format("%s: %s\\n",
+            prompt.append(String.format("%s: %s\n",
                     date,
                     String.join(", ", times)));
         });
 
-        prompt.append("\\nHelp the user find and book a suitable time slot. ");
-        prompt.append("If they want to book, extract the date and time clearly.");
+        prompt.append("\nHelp the user find and book a suitable time slot. ");
+        prompt.append("When the user confirms they want to book a specific date and time, ");
+        prompt.append("respond with EXACTLY this format on a new line:\n");
+        prompt.append("BOOK:YYYY-MM-DD:HH:MM\n");
+        prompt.append("For example: BOOK:2025-11-06:09:00\n");
+        prompt.append("Then on the next line, provide your friendly confirmation message.");
 
         return prompt.toString();
     }
@@ -98,6 +103,26 @@ public class AppointmentAgentHandler
                 .thenAccept(response -> {
                     String llmContent = parseOpenAIResponse(response.body());
 
+                    // Check if LLM wants to book an appointment
+                    String bookingCommand = extractBookingCommand(llmContent);
+                    if (bookingCommand != null) {
+                        // Parse the booking command: BOOK:YYYY-MM-DD:HH:MM
+                        String afterBook = bookingCommand.substring(5); // Remove "BOOK:"
+                        String[] parts = afterBook.split(":", 2); // Split into date and time
+                        if (parts.length == 2) {
+                            String date = parts[0]; // YYYY-MM-DD
+                            String time = parts[1]; // HH:MM
+
+                            // Trigger the actual booking
+                            context.tellSelf(new BookAppointment(date, time, replyTo));
+
+                            // Remove the booking command from the response (including the line)
+                            llmContent = llmContent.replace(bookingCommand, "").trim();
+                            // Clean up multiple newlines
+                            llmContent = llmContent.replaceAll("\\n\\s*\\n", "\\n").trim();
+                        }
+                    }
+
                     // Send response back to user
                     context.tell(replyTo, new AgentResponse(llmContent));
 
@@ -120,17 +145,11 @@ public class AppointmentAgentHandler
         List<String> slots = state.availableSlots().get(msg.date());
 
         if (slots != null && slots.contains(msg.time())) {
-            // Book the slot
+            // Book the slot - the confirmation message was already sent by the AI
             AppointmentState newState = state.bookSlot(msg.date(), msg.time());
-
-            context.tell(msg.replyTo(),
-                    new AgentResponse(
-                            String.format("Great! I've booked your appointment for %s at %s",
-                                    msg.date(),
-                                    msg.time())));
-
             return newState;
         } else {
+            // Only send error message if booking failed
             context.tell(msg.replyTo(),
                     new AgentResponse("Sorry, that slot is not available."));
             return state;
@@ -142,12 +161,29 @@ public class AppointmentAgentHandler
             AppointmentState state,
             ActorContext context
     ) {
-        StringBuilder slots = new StringBuilder("Available slots:\\n");
+        StringBuilder slots = new StringBuilder("Available slots:\n");
         state.availableSlots().forEach((date, times) -> {
-            slots.append(String.format("%s: %s\\n", date, String.join(", ", times)));
+            slots.append(String.format("%s: %s\n", date, String.join(", ", times)));
         });
 
         context.tell(msg.replyTo(), new AgentResponse(slots.toString()));
+        return state;
+    }
+
+    private AppointmentState handleGetBookings(
+            GetBookedAppointments msg,
+            AppointmentState state,
+            ActorContext context
+    ) {
+        if (state.confirmedBookings().isEmpty()) {
+            context.tell(msg.replyTo(), new AgentResponse("No appointments booked yet."));
+        } else {
+            StringBuilder bookings = new StringBuilder("Booked appointments:\n");
+            state.confirmedBookings().forEach(booking -> {
+                bookings.append(String.format("  - %s at %s\n", booking.date(), booking.time()));
+            });
+            context.tell(msg.replyTo(), new AgentResponse(bookings.toString()));
+        }
         return state;
     }
 
@@ -187,6 +223,19 @@ public class AppointmentAgentHandler
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    private String extractBookingCommand(String llmResponse) {
+        // Look for BOOK:YYYY-MM-DD:HH:MM pattern anywhere in the response
+        // Pattern: BOOK followed by date (YYYY-MM-DD) and time (HH:MM)
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("BOOK:(\\d{4}-\\d{2}-\\d{2}):(\\d{2}:\\d{2})");
+        java.util.regex.Matcher matcher = pattern.matcher(llmResponse);
+
+        if (matcher.find()) {
+            return matcher.group(0); // Returns the full match: BOOK:2025-11-06:09:00
+        }
+
+        return null;
     }
 }
 
