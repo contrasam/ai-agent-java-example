@@ -73,11 +73,11 @@ public class AppointmentAgentHandler
         });
 
         prompt.append("\nHelp the user find and book a suitable time slot. ");
-        prompt.append("When the user confirms they want to book a specific date and time, ");
-        prompt.append("respond with EXACTLY this format on a new line:\n");
+        prompt.append("When the user confirms they want to book a specific date and time, you MUST respond with EXACTLY this format on a new line, even if the user uses natural language:\n");
         prompt.append("BOOK:YYYY-MM-DD:HH:MM\n");
         prompt.append("For example: BOOK:2025-11-06:09:00\n");
         prompt.append("Then on the next line, provide your friendly confirmation message.\n");
+        prompt.append("Do not confirm a booking unless you have included the BOOK:... line.\n");
         prompt.append("\nIf the user wants to cancel an appointment, you MUST respond with EXACTLY this format on a new line, even if the user uses natural language:\n");
         prompt.append("CANCEL:YYYY-MM-DD:HH:MM\n");
         prompt.append("For example: CANCEL:2025-11-06:09:00\n");
@@ -124,6 +124,12 @@ public class AppointmentAgentHandler
                             llmContent = llmContent.replace(bookingCommand, "").trim();
                             // Clean up multiple newlines
                             llmContent = llmContent.replaceAll("\\n\\s*\\n", "\\n").trim();
+                        }
+                    } else if (llmContent.toLowerCase().contains("scheduled") || llmContent.toLowerCase().contains("booked")) {
+                        // Fallback: try to extract date and time from the message if LLM says it booked but didn't include BOOK:...
+                        String[] dateTime = extractDateTimeFromBookingMessage(llmContent);
+                        if (dateTime != null) {
+                            context.tellSelf(new BookAppointment(dateTime[0], dateTime[1], replyTo));
                         }
                     }
 
@@ -178,6 +184,74 @@ public class AppointmentAgentHandler
         }
         // Add more patterns as needed for robustness
         return null;
+    }
+
+    private String[] extractDateTimeFromBookingMessage(String message) {
+        // 24-hour patterns
+        java.util.regex.Pattern pattern1 = java.util.regex.Pattern.compile("for (\\d{2}:\\d{2}) on (\\w+ \\d{1,2}(?:st|nd|rd|th)?,? \\d{4})");
+        java.util.regex.Matcher matcher1 = pattern1.matcher(message);
+        if (matcher1.find()) {
+            String time = matcher1.group(1);
+            String dateText = matcher1.group(2);
+            String date = parseNaturalLanguageDate(dateText);
+            if (date != null) return new String[] { date, time };
+        }
+        java.util.regex.Pattern pattern2 = java.util.regex.Pattern.compile("on (\\d{4}-\\d{2}-\\d{2}) at (\\d{2}:\\d{2})");
+        java.util.regex.Matcher matcher2 = pattern2.matcher(message);
+        if (matcher2.find()) {
+            return new String[] { matcher2.group(1), matcher2.group(2) };
+        }
+        java.util.regex.Pattern pattern3 = java.util.regex.Pattern.compile("for (\\d{2}:\\d{2}) on (\\d{4}-\\d{2}-\\d{2})");
+        java.util.regex.Matcher matcher3 = pattern3.matcher(message);
+        if (matcher3.find()) {
+            return new String[] { matcher3.group(2), matcher3.group(1) };
+        }
+        // 12-hour patterns
+        java.util.regex.Pattern pattern4 = java.util.regex.Pattern.compile("for (\\d{1,2}:\\d{2}) ?([APap][Mm]) on (\\w+ \\d{1,2}(?:st|nd|rd|th)?,? \\d{4})");
+        java.util.regex.Matcher matcher4 = pattern4.matcher(message);
+        if (matcher4.find()) {
+            String time12 = matcher4.group(1);
+            String ampm = matcher4.group(2);
+            String dateText = matcher4.group(3);
+            String date = parseNaturalLanguageDate(dateText);
+            String time24 = convertTo24Hour(time12, ampm);
+            if (date != null && time24 != null) return new String[] { date, time24 };
+        }
+        java.util.regex.Pattern pattern5 = java.util.regex.Pattern.compile("at (\\d{1,2}:\\d{2}) ?([APap][Mm]) on (\\w+ \\d{1,2}(?:st|nd|rd|th)?,? \\d{4})");
+        java.util.regex.Matcher matcher5 = pattern5.matcher(message);
+        if (matcher5.find()) {
+            String time12 = matcher5.group(1);
+            String ampm = matcher5.group(2);
+            String dateText = matcher5.group(3);
+            String date = parseNaturalLanguageDate(dateText);
+            String time24 = convertTo24Hour(time12, ampm);
+            if (date != null && time24 != null) return new String[] { date, time24 };
+        }
+        return null;
+    }
+
+    private String convertTo24Hour(String time12, String ampm) {
+        try {
+            java.time.format.DateTimeFormatter fmt12 = java.time.format.DateTimeFormatter.ofPattern("h:mm a");
+            java.time.format.DateTimeFormatter fmt24 = java.time.format.DateTimeFormatter.ofPattern("HH:mm");
+            java.time.LocalTime t = java.time.LocalTime.parse(time12 + " " + ampm.toUpperCase(), fmt12);
+            return t.format(fmt24);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+
+    // Helper to parse natural language date like 'November 5th, 2025' to '2025-11-05'
+    private String parseNaturalLanguageDate(String dateText) {
+        try {
+            java.time.format.DateTimeFormatter inputFmt = java.time.format.DateTimeFormatter.ofPattern("MMMM d['st']['nd']['rd']['th'], yyyy");
+            java.time.format.DateTimeFormatter outputFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            java.time.LocalDate date = java.time.LocalDate.parse(dateText.replaceAll("(st|nd|rd|th)", ""), inputFmt);
+            return date.format(outputFmt);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private AppointmentState handleBooking(
