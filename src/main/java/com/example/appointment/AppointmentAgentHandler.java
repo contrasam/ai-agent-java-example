@@ -77,11 +77,12 @@ public class AppointmentAgentHandler
         prompt.append("respond with EXACTLY this format on a new line:\n");
         prompt.append("BOOK:YYYY-MM-DD:HH:MM\n");
         prompt.append("For example: BOOK:2025-11-06:09:00\n");
-        prompt.append("Then on the next line, provide your friendly confirmation message.");
-        prompt.append("\nIf the user wants to cancel an appointment, respond with EXACTLY this format on a new line:\n");
+        prompt.append("Then on the next line, provide your friendly confirmation message.\n");
+        prompt.append("\nIf the user wants to cancel an appointment, you MUST respond with EXACTLY this format on a new line, even if the user uses natural language:\n");
         prompt.append("CANCEL:YYYY-MM-DD:HH:MM\n");
         prompt.append("For example: CANCEL:2025-11-06:09:00\n");
         prompt.append("Then on the next line, provide your friendly cancellation confirmation message.\n");
+        prompt.append("Do not confirm a cancellation unless you have included the CANCEL:... line.\n");
 
         return prompt.toString();
     }
@@ -117,10 +118,8 @@ public class AppointmentAgentHandler
                         if (parts.length == 2) {
                             String date = parts[0]; // YYYY-MM-DD
                             String time = parts[1]; // HH:MM
-
                             // Trigger the actual booking
                             context.tellSelf(new BookAppointment(date, time, replyTo));
-
                             // Remove the booking command from the response (including the line)
                             llmContent = llmContent.replace(bookingCommand, "").trim();
                             // Clean up multiple newlines
@@ -143,6 +142,12 @@ public class AppointmentAgentHandler
                             llmContent = llmContent.replace(cancelCommand, "").trim();
                             llmContent = llmContent.replaceAll("\\n\\s*\\n", "\\n").trim();
                         }
+                    } else if (llmContent.toLowerCase().contains("cancelled") || llmContent.toLowerCase().contains("canceled")) {
+                        // Fallback: try to extract date and time from the message if LLM says it cancelled but didn't include CANCEL:...
+                        String[] dateTime = extractDateTimeFromCancelMessage(llmContent);
+                        if (dateTime != null) {
+                            context.tellSelf(new CancelAppointment(dateTime[0], dateTime[1], replyTo));
+                        }
                     }
 
                     // Send response back to user
@@ -156,6 +161,23 @@ public class AppointmentAgentHandler
                             new AgentResponse("Sorry, I encountered an error: " + ex.getMessage()));
                     return null;
                 });
+    }
+
+    // Fallback: Try to extract date and time from a cancellation message
+    private String[] extractDateTimeFromCancelMessage(String message) {
+        // Look for patterns like 'on 2025-11-05 at 16:00' or 'for 16:00 on November 5th, 2025'
+        java.util.regex.Pattern pattern1 = java.util.regex.Pattern.compile("on (\\d{4}-\\d{2}-\\d{2}) at (\\d{2}:\\d{2})");
+        java.util.regex.Matcher matcher1 = pattern1.matcher(message);
+        if (matcher1.find()) {
+            return new String[] { matcher1.group(1), matcher1.group(2) };
+        }
+        java.util.regex.Pattern pattern2 = java.util.regex.Pattern.compile("for (\\d{2}:\\d{2}) on (\\d{4}-\\d{2}-\\d{2})");
+        java.util.regex.Matcher matcher2 = pattern2.matcher(message);
+        if (matcher2.find()) {
+            return new String[] { matcher2.group(2), matcher2.group(1) };
+        }
+        // Add more patterns as needed for robustness
+        return null;
     }
 
     private AppointmentState handleBooking(
