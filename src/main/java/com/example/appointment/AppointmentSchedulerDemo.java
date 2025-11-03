@@ -33,6 +33,7 @@ public class AppointmentSchedulerDemo {
         System.out.println("Special commands:");
         System.out.println("  /slots  - Check available appointment slots");
         System.out.println("  /booked - View all booked appointments");
+        System.out.println("  /cancel <date> <time> - Cancel an appointment (e.g. /cancel 2025-11-06 09:00)");
         System.out.println("  /quit   - Exit the application");
         System.out.println("=================================================\n");
 
@@ -54,6 +55,17 @@ public class AppointmentSchedulerDemo {
             } else if (userInput.equalsIgnoreCase("/booked")) {
                 agentPid.tell(new GetBookedAppointments(receiverPid));
                 Thread.sleep(500); // Give time for response
+            } else if (userInput.toLowerCase().startsWith("/cancel ")) {
+                // Parse /cancel <date> <time>
+                String[] parts = userInput.split("\\s+");
+                if (parts.length >= 3) {
+                    String date = parts[1];
+                    String time = parts[2];
+                    agentPid.tell(new CancelAppointment(date, time, receiverPid));
+                    Thread.sleep(500); // Give time for response
+                } else {
+                    System.out.println("Usage: /cancel <date> <time> (e.g. /cancel 2025-11-06 09:00)");
+                }
             } else {
                 agentPid.tell(new UserMessage(userInput, receiverPid));
                 Thread.sleep(2000); // Give time for LLM response
@@ -64,4 +76,3 @@ public class AppointmentSchedulerDemo {
         system.shutdown();
     }
 }
-

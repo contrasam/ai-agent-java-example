@@ -9,7 +9,8 @@ public sealed interface AppointmentMessage extends Serializable permits
     LLMResponse,
     GetAvailableSlots,
     GetBookedAppointments,
-    BookAppointment {}
+    BookAppointment,
+    CancelAppointment {}
 
 record UserMessage(String text, Pid replyTo) implements AppointmentMessage {}
 
@@ -21,5 +22,6 @@ record GetBookedAppointments(Pid replyTo) implements AppointmentMessage {}
 
 record BookAppointment(String date, String time, Pid replyTo) implements AppointmentMessage {}
 
-record AgentResponse(String message) implements Serializable {}
+record CancelAppointment(String date, String time, Pid replyTo) implements AppointmentMessage {}
 
+record AgentResponse(String message) implements Serializable {}

@@ -33,8 +33,25 @@ public record AppointmentState(List<Message> conversationHistory, Map<String, Li
 
         return new AppointmentState(conversationHistory, newSlots, newBookings);
     }
+
+    public boolean hasBooking(String date, String time) {
+        return confirmedBookings.stream().anyMatch(b -> b.date().equals(date) && b.time().equals(time));
+    }
+
+    public AppointmentState removeBooking(String date, String time) {
+        List<Booking> newBookings = new ArrayList<>(confirmedBookings);
+        boolean removed = newBookings.removeIf(b -> b.date().equals(date) && b.time().equals(time));
+        if (!removed) return this;
+        Map<String, List<String>> newSlots = new HashMap<>(availableSlots);
+        List<String> daySlots = new ArrayList<>(newSlots.getOrDefault(date, new ArrayList<>()));
+        if (!daySlots.contains(time)) {
+            daySlots.add(time);
+            Collections.sort(daySlots);
+        }
+        newSlots.put(date, daySlots);
+        return new AppointmentState(conversationHistory, newSlots, newBookings);
+    }
 }
 
 record Message(String role, String content) implements Serializable {}
 record Booking(String date, String time) implements Serializable {}
-

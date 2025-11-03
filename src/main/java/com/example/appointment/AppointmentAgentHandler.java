@@ -40,6 +40,7 @@ public class AppointmentAgentHandler
             case GetBookedAppointments gba -> handleGetBookings(gba, state, context);
             case BookAppointment ba -> handleBooking(ba, state, context);
             case LLMResponse lr -> state.addMessage("assistant", lr.content());
+            case CancelAppointment ca -> handleCancel(ca, state, context);
         };
     }
 
@@ -77,6 +78,10 @@ public class AppointmentAgentHandler
         prompt.append("BOOK:YYYY-MM-DD:HH:MM\n");
         prompt.append("For example: BOOK:2025-11-06:09:00\n");
         prompt.append("Then on the next line, provide your friendly confirmation message.");
+        prompt.append("\nIf the user wants to cancel an appointment, respond with EXACTLY this format on a new line:\n");
+        prompt.append("CANCEL:YYYY-MM-DD:HH:MM\n");
+        prompt.append("For example: CANCEL:2025-11-06:09:00\n");
+        prompt.append("Then on the next line, provide your friendly cancellation confirmation message.\n");
 
         return prompt.toString();
     }
@@ -119,6 +124,23 @@ public class AppointmentAgentHandler
                             // Remove the booking command from the response (including the line)
                             llmContent = llmContent.replace(bookingCommand, "").trim();
                             // Clean up multiple newlines
+                            llmContent = llmContent.replaceAll("\\n\\s*\\n", "\\n").trim();
+                        }
+                    }
+
+                    // Check if LLM wants to cancel an appointment
+                    String cancelCommand = extractCancelCommand(llmContent);
+                    if (cancelCommand != null) {
+                        // Parse the cancel command: CANCEL:YYYY-MM-DD:HH:MM
+                        String afterCancel = cancelCommand.substring(7); // Remove "CANCEL:"
+                        String[] parts = afterCancel.split(":", 2); // Split into date and time
+                        if (parts.length == 2) {
+                            String date = parts[0]; // YYYY-MM-DD
+                            String time = parts[1]; // HH:MM
+                            // Trigger the actual cancellation
+                            context.tellSelf(new CancelAppointment(date, time, replyTo));
+                            // Remove the cancel command from the response (including the line)
+                            llmContent = llmContent.replace(cancelCommand, "").trim();
                             llmContent = llmContent.replaceAll("\\n\\s*\\n", "\\n").trim();
                         }
                     }
@@ -187,6 +209,21 @@ public class AppointmentAgentHandler
         return state;
     }
 
+    private AppointmentState handleCancel(
+            CancelAppointment msg,
+            AppointmentState state,
+            ActorContext context
+    ) {
+        if (state.hasBooking(msg.date(), msg.time())) {
+            AppointmentState newState = state.removeBooking(msg.date(), msg.time());
+            context.tell(msg.replyTo(), new AgentResponse("Your appointment on " + msg.date() + " at " + msg.time() + " has been cancelled."));
+            return newState;
+        } else {
+            context.tell(msg.replyTo(), new AgentResponse("No such appointment found to cancel."));
+            return state;
+        }
+    }
+
     private String buildOpenAIRequest(String systemPrompt, AppointmentState state) {
         // Build JSON request
         String conversationHistory = state.conversationHistory().stream()
@@ -235,6 +272,16 @@ public class AppointmentAgentHandler
             return matcher.group(0); // Returns the full match: BOOK:2025-11-06:09:00
         }
 
+        return null;
+    }
+
+    private String extractCancelCommand(String llmResponse) {
+        // Look for CANCEL:YYYY-MM-DD:HH:MM pattern anywhere in the response
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("CANCEL:(\\d{4}-\\d{2}-\\d{2}):(\\d{2}:\\d{2})");
+        java.util.regex.Matcher matcher = pattern.matcher(llmResponse);
+        if (matcher.find()) {
+            return matcher.group(0); // Returns the full match: CANCEL:2025-11-06:09:00
+        }
         return null;
     }
 }
